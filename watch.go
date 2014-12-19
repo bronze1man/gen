@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -23,7 +25,7 @@ func watch(c config) error {
 
 	interval := 1 * time.Second
 	tick := time.Tick(interval)
-	done := make(chan struct{}, 1)
+	done := make(chan struct{})
 
 	// a buffer for events
 	var events []fsnotify.Event
@@ -34,6 +36,10 @@ func watch(c config) error {
 		for {
 			select {
 			case event := <-watcher.Events:
+				fmt.Println("watcher.Events")
+				loopErr = errors.New("shenanigans")
+				break Loop
+
 				if !strings.HasSuffix(event.Name, ".go") {
 					continue
 				}
@@ -41,8 +47,10 @@ func watch(c config) error {
 					events = append(events, event)
 				}
 			case loopErr = <-watcher.Errors:
+				fmt.Println("watcher.Errors")
 				done <- struct{}{}
 			case <-tick:
+				fmt.Println("tick")
 				if len(events) == 0 {
 					continue
 				}
@@ -50,14 +58,12 @@ func watch(c config) error {
 				// stop watching while gen'ing files
 				loopErr = watcher.Remove(dir)
 				if loopErr != nil {
-					done <- struct{}{}
 					break Loop
 				}
 
 				// gen the files
 				loopErr = run(c)
 				if loopErr != nil {
-					done <- struct{}{}
 					break Loop
 				}
 
@@ -67,22 +73,25 @@ func watch(c config) error {
 				// resume watching
 				loopErr = watcher.Add(dir)
 				if loopErr != nil {
-					done <- struct{}{}
 					break Loop
 				}
-			case <-done:
-				break Loop
 			}
 		}
+		done <- struct{}{}
 	}()
 
-	<-done
+	s := <-done
+	fmt.Println(s)
 	close(done)
+	fmt.Println("closed")
 
 	if loopErr != nil {
+		fmt.Println("returning an err")
+		fmt.Println(loopErr)
 		return loopErr
 	}
 
+	fmt.Println("returning nil")
 	return nil
 }
 
